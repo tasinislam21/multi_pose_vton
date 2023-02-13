@@ -1,0 +1,10 @@
+*.ipynb
+*.pkl
+*.dat
+.idea/
+.ipynb_checkpoints/
+__pycache__/
+checkpoint/
+data/
+fashion_data/
+result_eval/
