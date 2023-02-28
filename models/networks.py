@@ -70,7 +70,7 @@ class GMM(nn.Module):
     def __init__(self, input_nc, output_nc=3):
         super(GMM, self).__init__()
         self.stn = Affine(input_a=3, input_b=1)
-        nl = nn.BatchNorm2d
+        nl = nn.InstanceNorm2d
         self.conv1 = nn.Sequential(*[nn.Conv2d(input_nc, 64, kernel_size=3, stride=1, padding=1), nl(64), nn.ReLU()])
         self.pool1 = nn.MaxPool2d(kernel_size=(2, 2))
         self.conv2 = nn.Sequential(*[nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1), nl(128), nn.ReLU()])
@@ -328,42 +328,6 @@ class Unet(nn.Module):
 #         x = self.fc(x)
 #         return x
 
-class ColorCorrectionNetwork(nn.Module):
-    def __init__(self, input_channels, hidden_channels, output_channels):
-        super().__init__()
-        self.conv_net = nn.Sequential(*[
-            nn.Conv2d(input_channels, hidden_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(hidden_channels),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(kernel_size=(2, 2)),
-
-            nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(hidden_channels),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(kernel_size=(2, 2)),
-
-            nn.Conv2d(hidden_channels, output_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(output_channels),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(kernel_size=(2, 2))])
-
-        self.fc = nn.Sequential(*[
-            nn.Linear(65536, 8192),
-            nn.LeakyReLU(0.2),
-
-            nn.Linear(8192, 1024),
-            nn.LeakyReLU(0.2),
-
-            nn.Linear(1024, 128),
-            nn.LeakyReLU(0.2),
-
-            nn.Linear(128, 4)])
-
-    def forward(self, x):
-        x = self.conv_net(x)
-        x = x.view(x.size(0), -1) # flatten
-        x = self.fc(x)
-        return x
 
 class Discriminator(nn.Module):
     def __init__(self, input_nc, n_layers=2, getIntermFeat=False):

@@ -42,8 +42,7 @@ synchronize()
 
 #G1 = networks.GMM(input_nc=7).to(device)
 G1 = xing.XingNetwork(input_nc=[3,3], output_nc=3).to(device)
-#D1 = networks.Discriminator(7).to(device)
-D1 = xing.ResnetDiscriminator(input_nc=6, use_dropout=True, n_blocks=3, use_sigmoid=True).to(device)
+D1 = networks.Discriminator(7).to(device)
 
 optimizerG = torch.optim.Adam(G1.parameters(), lr=0.0002, betas=(opt.beta1, 0.999))
 optimizerD = torch.optim.Adam(D1.parameters(), lr=0.0002, betas=(opt.beta1, 0.999))
@@ -55,7 +54,7 @@ if get_rank() == 0:
 
 G1 = nn.parallel.DistributedDataParallel(
         G1,
-        find_unused_parameters=True,
+        #find_unused_parameters=True,
         device_ids=[args.local_rank],
         output_device=args.local_rank,
         broadcast_buffers=False
@@ -163,18 +162,6 @@ def discriminate(netD ,input_label, real_or_fake):
     input = torch.cat([input_label, real_or_fake], dim=1)
     return netD.forward(input)
 
-def backward_D_basic(netD, real, fake):
-    # Real
-    pred_real = netD(real)
-    loss_D_real = criterionGAN(pred_real, True) * 5.0
-    # Fake
-    pred_fake = netD(fake.detach())
-    loss_D_fake = criterionGAN(pred_fake, False) * 5.0
-    # Combined loss
-    loss_D = (loss_D_real + loss_D_fake) * 0.5
-    # backward
-    loss_D.backward()
-    return loss_D
 
 criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=torch.cuda.FloatTensor)
 criterionVGG = networks.VGGLoss()
@@ -201,7 +188,7 @@ for epoch in range(50):
         requires_grad(G1, False)
 
         #fake_c, affine = G1.forward(clothes, cloth_label, skeleton)
-        fake_c, affine = G1(input=[clothes, cloth_label, skeleton])
+        fake_c = G1(input=[clothes, skeleton])
         fake_c *= cloth_label
         fake_c = tanh(fake_c)
 
@@ -210,37 +197,34 @@ for epoch in range(50):
         input_pool = torch.cat([cloth_label, clothes], 1)
         D_pool = D1
 
-        #pred_fake = discriminate(D_pool, input_pool.detach(), fake_pool.detach())
-        #loss_D_fake = criterionGAN(pred_fake, False)
-        #pred_real = discriminate(D_pool, input_pool.detach(), real_pool.detach())
-        #loss_D_real = criterionGAN(pred_real, True)
-        #loss_D = (loss_D_fake + loss_D_real)
+        pred_fake = discriminate(D_pool, input_pool.detach(), fake_pool.detach())
+        loss_D_fake = criterionGAN(pred_fake, False)
+        pred_real = discriminate(D_pool, input_pool.detach(), real_pool.detach())
+        loss_D_real = criterionGAN(pred_real, True)
+        loss_D = (loss_D_fake + loss_D_real)
 
-        loss_D_PP = backward_D_basic(D1, torch.cat([real_pool, skeleton], 1), torch.cat([fake_pool, skeleton], 1))
 
         optimizerD.zero_grad()
-        #loss_D.backward()
-        loss_D = loss_D_PP.item()
+        loss_D.backward()
         optimizerD.step()
 
         requires_grad(D1, False)
         requires_grad(G1, True)
 
         #fake_c, affine = G1.forward(clothes, cloth_label, skeleton)
-        fake_c, affine = G1(input=[clothes, cloth_label, skeleton])
+        fake_c = G1(input=[clothes, skeleton])
         fake_c *= cloth_label
         fake_c = tanh(fake_c)
 
         real_pool = (candidate * cloth_label)
         fake_pool = fake_c
-        #input_pool = torch.cat([cloth_label, clothes], 1)
+        input_pool = torch.cat([cloth_label, clothes], 1)
         D_pool = D1
 
-        #pred_fake = D_pool.forward(torch.cat((input_pool.detach(), fake_pool.detach()), dim=1))
-        pred_fake = D1(torch.cat([fake_pool, skeleton], 1).detach())
+        pred_fake = D_pool.forward(torch.cat((input_pool.detach(), fake_pool.detach()), dim=1))
         loss_G_GAN = criterionGAN(pred_fake, True)
         loss_G_VGG = criterionVGG(fake_pool, real_pool)
-        L1_loss = criterionFeat(affine, real_pool)
+        #L1_loss = criterionFeat(affine, real_pool)
         L1_loss = criterionFeat(fake_pool, real_pool)
         loss_G = loss_G_GAN + L1_loss + loss_G_VGG
 
@@ -258,11 +242,11 @@ for epoch in range(50):
             if step % 200 == 0:
                 writer.add_image('clothes', torchvision.utils.make_grid(clothes), step)
                 writer.add_image('gt', torchvision.utils.make_grid(candidate*cloth_label), step)
-                writer.add_image('affine_garment', torchvision.utils.make_grid(affine), step)
+                #writer.add_image('affine_garment', torchvision.utils.make_grid(affine), step)
                 writer.add_image('generated', torchvision.utils.make_grid(fake_c), step)
 
-    #for param_group in optimizerD.param_groups:
-    #    param_group['lr'] *= 0.75
+    for param_group in optimizerD.param_groups:
+        param_group['lr'] *= 0.65
     if get_rank() == 0:
         torch.save(g_module.state_dict(), checkpoint_loc + '/gmm_xing_' + str(epoch) + '.pth')
 if get_rank() == 0:
