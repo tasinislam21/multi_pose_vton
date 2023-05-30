@@ -271,9 +271,9 @@ class Discriminator(nn.Module):
         self.n_layers = n_layers
         self.getIntermFeat = getIntermFeat
         nl = nn.BatchNorm2d
-        self.conv1 = nn.Sequential(*[nn.Conv2d(input_nc, 64, kernel_size=4, stride=2, padding=2), nn.LeakyReLU(0.2, True), nn.Dropout(0.80)])
-        self.conv2 = nn.Sequential(*[nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=2), nl(128) , nn.LeakyReLU(0.2, True), nn.Dropout(0.65)])
-        self.conv3 = nn.Sequential(*[nn.Conv2d(128, 256, kernel_size=4, stride=1, padding=2), nl(256) , nn.LeakyReLU(0.2, True), nn.Dropout(0.50)])
+        self.conv1 = nn.Sequential(*[nn.Conv2d(input_nc, 64, kernel_size=4, stride=2, padding=2), nn.LeakyReLU(0.2, True)])
+        self.conv2 = nn.Sequential(*[nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=2), nl(128) , nn.LeakyReLU(0.2, True)])
+        self.conv3 = nn.Sequential(*[nn.Conv2d(128, 256, kernel_size=4, stride=1, padding=2), nl(256) , nn.LeakyReLU(0.2, True)])
         self.conv4 = nn.Sequential(*[nn.Conv2d(256, 1, kernel_size=4, stride=1, padding=2), nn.Sigmoid()])
 
     def forward(self, x):
