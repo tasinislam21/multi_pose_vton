@@ -28,8 +28,9 @@ pip install -r requirements.txt
 ## Dataset
 
 Download the VITON-HD dataset by clicking on this link: 
-[[VITON-HD dataset]](https://www.dropbox.com/s/8nl54f3uzf5p6zi/SVTON_DATASET.zip?dl=0)
- Extract the files and place them in the ```viton_hd_dataset``` directory
+[[VITON-HD dataset]](https://www.dropbox.com/s/142kewkymaqwi2z/viton_hd_dataset.zip?dl=0)
+
+Extract the files and place them in the ```viton_hd_dataset``` directory
 
 If you wish to train the pose transfer module then you must download the DeepFashion dataset, please refer to:
 [[DeepFashion dataset]](https://github.com/BadourAlBahar/pose-with-style/blob/main/DATASET.md)
@@ -42,9 +43,9 @@ Extract the files and place them in the ```checkpoint``` directory
 ## Inference
 To run the inference of our model, execute ```python run_inference.py```
 
-To create your own custom pair of candidate image and target clothing, follow these steps:
+To create your own custom pair of candidate image, target pose and clothing, follow these steps:
 - Create a text file within the ```viton_hd_dataset``` directory.
-- In the text file, add the name of the candidate image in the first column and the name of the garment in the second column.
+- Add the names of the candidate, pose, clothing in the first, second and third columns, respectively.
 - Then run: ```python run_inference.py --datapairs custom.txt```
 
 The results will be saved in the ```result``` directory. 
