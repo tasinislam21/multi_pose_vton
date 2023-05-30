@@ -64,7 +64,6 @@ class KeyDataset(data.Dataset):
         self.dir_poseHD = osp.join(opt.dataroot, opt.phase, 'candidateHD_pose')
         self.dir_clothesHD = osp.join(opt.dataroot, opt.phase, 'clothesHD')
         self.dir_clothesMaskHD = osp.join(opt.dataroot, opt.phase, 'clothesHD_mask')
-        self.dir_warped_person = osp.join(opt.dataroot, opt.phase, 'warped_person')
 
         self.init_categories(opt.dataroot ,opt.datapairs)
 
@@ -93,7 +92,6 @@ class KeyDataset(data.Dataset):
         poseHD_path = osp.join(self.dir_poseHD, pose_name[:-8]+'_rendered.png')
         clothesHD_path = osp.join(self.dir_clothesHD, cloth_name)
         clothesHD_mask_path = osp.join(self.dir_clothesMaskHD, cloth_name)
-        warped_person_path = osp.join(self.dir_warped_person, candidate_name[:-3]+'pt')
         candidateHD_img = Image.open(candidateHD_path).convert('RGB')
         labelHD_img = Image.open(labelHD_path).convert('L')
         poseHD_img = Image.open(poseHD_path).convert('RGB')
@@ -109,10 +107,8 @@ class KeyDataset(data.Dataset):
         clothesHD = self.transform_Clothes(clothesHD_img)
         denseHD = torch.from_numpy(denseHD).permute(2, 0, 1)
         clothesHD_mask = self.transform_Mask(clothesHD_mask_img)
-        warped_person = torch.load(warped_person_path)
         return {'candidateHD': candidateHD, 'labelHD': labelHD, 'denseHD': denseHD, 'source_dense': source_denseHD,
-                'clothesHD': clothesHD, 'clothesHD_mask': clothesHD_mask, 'poseHD': poseHD,
-                'warped_person': warped_person, 'name':candidate_name}
+                'clothesHD': clothesHD, 'clothesHD_mask': clothesHD_mask, 'poseHD': poseHD, 'name':candidate_name}
 
     def __len__(self):
             return len(self.human_names)
