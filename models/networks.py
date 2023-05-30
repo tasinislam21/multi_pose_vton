@@ -66,6 +66,27 @@ class PHPM(nn.Module):
         conv9 = self.conv9(torch.cat([conv1, up9], 1))
         return conv9
 
+class SelfAttention(nn.Module):
+    def __init__(self, in_channels, k_channels):
+        super(SelfAttention, self).__init__()
+        self.query_conv = nn.Conv2d(in_channels, k_channels, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels, k_channels, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.softmax = nn.Softmax(dim=-1)
+    def forward(self, x):
+        batch_size, channels, height, width = x.size()
+        # Compute the query, key, and value representations
+        query = self.query_conv(x).view(batch_size, -1, width * height).permute(0, 2, 1)
+        key = self.key_conv(x).view(batch_size, -1, width * height)
+        value = self.value_conv(x).view(batch_size, -1, width * height)
+        # Compute the self-attention scores
+        attention_scores = torch.bmm(query, key)
+        attention_scores = self.softmax(attention_scores)
+        # Compute the weighted sum of the value representations
+        weighted_sum = torch.bmm(value, attention_scores.permute(0, 2, 1))
+        weighted_sum = weighted_sum.view(batch_size, channels, height, width)
+        return weighted_sum
+
 class GMM(nn.Module):
     def __init__(self, input_nc, output_nc=3):
         super(GMM, self).__init__()
@@ -85,7 +106,7 @@ class GMM(nn.Module):
                                      nn.Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1), nl(1024), nn.ReLU()])
         self.drop5 = nn.Dropout(0.5)
 
-        # ------------------------------------------------ encoder-decoder split --------------------------------------------------------
+# ------------------------------------------------ encoder-decoder split --------------------------------------------------------
 
         self.up6 = nn.Sequential(
             *[nn.UpsamplingNearest2d(scale_factor=2), nn.Conv2d(1024, 512, kernel_size=3, stride=1, padding=1), nl(512),
@@ -129,8 +150,6 @@ class GMM(nn.Module):
         conv8 = self.conv8(torch.cat([conv2, up8], 1))
         up9 = self.up9(conv8)
         conv9 = self.conv9(torch.cat([conv1, up9], 1))
-        # Encoder has 7 convolution layers
-        # Decoder has 10 convolution layers
         return conv9, affine_transformed
 
 class Affine(nn.Module):
@@ -179,54 +198,6 @@ class Affine(nn.Module):
         # transform the input
         x = self.stn(clothes, in_mask_clothes)
         return x
-
-# class Affine(nn.Module):
-#     def __init__(self, input_a, input_b):
-#         super(Affine, self).__init__()
-#         self.conv1 = nn.Conv2d(input_a, 10, kernel_size=5)
-#         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-#         self.conv2_drop = nn.Dropout2d()
-#         self.fc1 = nn.Linear(320, 50)
-#         self.fc2 = nn.Linear(50, 10)
-#
-#         # Spatial transformer localization-network
-#         self.localization = nn.Sequential(
-#             nn.Conv2d(input_b, 8, kernel_size=7),
-#             nn.MaxPool2d(2, stride=2),
-#             nn.ReLU(True),
-#             nn.Conv2d(8, 10, kernel_size=5),
-#             nn.MaxPool2d(2, stride=2),
-#             nn.ReLU(True)
-#         )
-#
-#         # Regressor for the 3 * 2 affine matrix
-#         self.fc_loc = nn.Sequential(
-#             #nn.Linear(10 * 60 * 44, 32),
-#             nn.Linear(153760, 32),
-#             nn.ReLU(True),
-#             nn.Linear(32, 3 * 2)
-#         )
-#
-#         # Initialize the weights/bias with identity transformation
-#         self.fc_loc[2].weight.data.zero_()
-#         self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
-#
-#     # Spatial transformer network forward function
-#     def stn(self, clothes, mask, in_mask_clothes):
-#         xs = self.localization(in_mask_clothes)
-#         #xs = xs.view(-1, 10 * 60 * 44)
-#         xs = xs.view(-1, 153760)
-#         theta = self.fc_loc(xs)
-#         theta = theta.view(-1, 2, 3)
-#         grid = F.affine_grid(theta, clothes.size())
-#         x = F.grid_sample(clothes, grid)
-#         y = F.grid_sample(mask, grid)
-#         return x, y
-#
-#     def forward(self, clothes, mask, in_mask_clothes):
-#         # transform the input
-#         x, y = self.stn(clothes, mask, in_mask_clothes)
-#         return x, y
 
 class Unet(nn.Module):
     def __init__(self, input_nc, output_nc=3):
@@ -293,41 +264,6 @@ class Unet(nn.Module):
         up9 = self.up9(conv8)
         conv9 = self.conv9(torch.cat([conv1, up9], 1))
         return conv9
-
-# class ColorCorrectionNetwork(nn.Module):
-#     def __init__(self, input_channels, hidden_channels, output_channels):
-#         super().__init__()
-#         self.conv_net = nn.Sequential(*[
-#             nn.Conv2d(input_channels, hidden_channels, kernel_size=3, padding=1),
-#             nn.BatchNorm2d(hidden_channels),
-#             nn.LeakyReLU(0.2),
-#             nn.MaxPool2d(kernel_size=(2, 2)),
-#
-#             nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
-#             nn.BatchNorm2d(hidden_channels),
-#             nn.LeakyReLU(0.2),
-#             nn.MaxPool2d(kernel_size=(2, 2)),
-#
-#             nn.Conv2d(hidden_channels, output_channels, kernel_size=3, padding=1),
-#             nn.BatchNorm2d(output_channels),
-#             nn.LeakyReLU(0.2),
-#             nn.MaxPool2d(kernel_size=(2, 2))])
-#
-#         self.fc = nn.Sequential(*[
-#             nn.Linear(12288, 1024),
-#             nn.LeakyReLU(0.2),
-#
-#             nn.Linear(1024, 128),
-#             nn.LeakyReLU(0.2),
-#
-#             nn.Linear(128, 4)])
-#
-#     def forward(self, x):
-#         x = self.conv_net(x)
-#         x = x.view(x.size(0), -1) # flatten
-#         x = self.fc(x)
-#         return x
-
 
 class Discriminator(nn.Module):
     def __init__(self, input_nc, n_layers=2, getIntermFeat=False):

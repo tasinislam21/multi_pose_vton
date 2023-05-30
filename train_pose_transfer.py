@@ -10,7 +10,7 @@ import torch.distributed as dist
 from torchvision import transforms
 from tqdm import tqdm
 from dataset import CustomDeepFashionDatasetHD
-from custom_model import GeneratorCustom, VGGLoss, Discriminator, GANLoss
+from models.cStyleGAN import GeneratorCustom, VGGLoss, Discriminator, GANLoss
 from tensorboardX import SummaryWriter
 import torchvision
 
@@ -21,7 +21,6 @@ from distributed import (
 from op import conv2d_gradfix
 
 criterionGAN = GANLoss(use_lsgan=False, tensor=torch.cuda.FloatTensor)
-
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -40,7 +39,6 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-
 def data_sampler(dataset, shuffle, distributed):
     if distributed:
         return data.distributed.DistributedSampler(dataset)
@@ -49,11 +47,9 @@ def data_sampler(dataset, shuffle, distributed):
     else:
         return data.SequentialSampler(dataset)
 
-
 def requires_grad(model, flag=True):
     for p in model.parameters():
         p.requires_grad = flag
-
 
 def accumulate(model1, model2, decay=0.999):
     par1 = dict(model1.named_parameters())
@@ -61,18 +57,15 @@ def accumulate(model1, model2, decay=0.999):
     for k in par1.keys():
         par1[k].data.mul_(decay).add_(par2[k].data, alpha=1 - decay)
 
-
 def sample_data(loader):
     while True:
         for batch in loader:
             yield batch
 
-
 def d_logistic_loss(real_pred, fake_pred):
     real_loss = F.softplus(-real_pred)
     fake_loss = F.softplus(fake_pred)
     return real_loss.mean() + fake_loss.mean()
-
 
 def d_r1_loss(real_pred, real_img):
     with conv2d_gradfix.no_weight_gradients():
@@ -82,11 +75,9 @@ def d_r1_loss(real_pred, real_img):
     grad_penalty = grad_real.pow(2).reshape(grad_real.shape[0], -1).sum(1).mean()
     return grad_penalty
 
-
 def g_nonsaturating_loss(fake_pred):
     loss = F.softplus(-fake_pred).mean()
     return loss
-
 
 def set_grad_none(model, targets):
     for n, p in model.named_parameters():
@@ -304,84 +295,51 @@ def train(args, loader, sampler, generator, discriminator, g_optim, d_optim, g_e
                     "g_ema": g_ema.state_dict(),
                     "g_optim": g_optim.state_dict(),
                     "d_optim": d_optim.state_dict(),
-                    "args": args,
-                },
-                os.path.join('checkpoint', args.name, f"pre_epoch_{str(epoch)}.pt"),
-            )
+                }, 'checkpoint_pose_transfer' + '/pose_transfer_' + str(epoch) + '.pth')
+
 
 
 if __name__ == "__main__":
     device = "cuda"
-
     parser = argparse.ArgumentParser(description="Pose with Style trainer")
-
-    parser.add_argument("path", type=str, default='../XingGAN/fashion_data')
-    parser.add_argument("--name", type=str, default="pose")
-    parser.add_argument("--epoch", type=int, default=50, help="total training epochs")
+    parser.add_argument("--epoch", type=int, default=10, help="total training epochs")
     parser.add_argument("--batch", type=int, default=1, help="batch sizes for each gpus")
     parser.add_argument("--workers", type=int, default=2, help="batch sizes for each gpus")
-    parser.add_argument("--n_sample", type=int, default=4, help="number of the samples generated during training")
-    parser.add_argument("--size", type=int, default=512, help="image sizes for the model")
     parser.add_argument("--r1", type=float, default=10, help="weight of the r1 regularization")
-    parser.add_argument("--channel_multiplier", type=int, default=2, help="channel multiplier factor for the model. config-f = 2, else = 1")
-    parser.add_argument(
-        "--d_reg_every",
-        type=int,
-        default=16,
-        help="interval of the applying r1 regularization",
-    )
-    parser.add_argument(
-        "--g_reg_every",
-        type=int,
-        default=4,
-        help="interval of the applying path length regularization",
-    )
-    parser.add_argument("--ckpt", type=str, default='checkpoint/nor/posewithstyle.pt', help="path to the checkpoints to resume training")
+    parser.add_argument("--channel_multiplier", type=int, default=2)
+    parser.add_argument("--d_reg_every", type=int, default=16)
+    parser.add_argument("--g_reg_every", type=int, default=4)
+    parser.add_argument("--ckpt", type=str, default='pretrained/posewithstyle.pt', help="pretrained checkpoint dir")
     parser.add_argument("--lr", type=float, default=0.002, help="learning rate")
     parser.add_argument("--wandb", action="store_true", help="use weights and biases logging")
     parser.add_argument("--local_rank", type=int, default=0, help="local rank for distributed training")
     parser.add_argument("--faceloss", action="store_true", help="add face loss when faces are detected")
-    parser.add_argument("--finetune", action="store_true", help="finetune to handle background- second step of training.")
-
-
+    parser.add_argument("--pairLst", type=str, default='custom_DeepFashion/face-only-pairs.csv')
+    parser.add_argument("--dataroot", type=str, default='custom_DeepFashion')
+    parser.add_argument("--phase", type=str, default='train')
     args = parser.parse_args()
 
-    n_gpu = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
-    args.distributed = n_gpu > 1
-
-    if args.distributed:
-        print ('Distributed Training Mode.')
-        torch.distributed.init_process_group(backend="nccl", init_method="env://")
-        torch.cuda.set_device(args.local_rank)
-        synchronize()
+    torch.distributed.init_process_group(backend="nccl", init_method="env://")
+    torch.cuda.set_device(args.local_rank)
+    synchronize()
 
     if get_rank() == 0:
-        if not os.path.exists(os.path.join('checkpoint', args.name)):
-            os.makedirs(os.path.join('checkpoint', args.name))
-        if not os.path.exists(os.path.join('sample', args.name)):
-            os.makedirs(os.path.join('sample', args.name))
-        writer = SummaryWriter('runs/style-pose')
+        if not os.path.exists('checkpoint_pose_transfer'):
+            os.makedirs('checkpoint_pose_transfer')
+        writer = SummaryWriter('runs/pose_transfer')
 
     args.latent = 2048
     args.n_mlp = 8
-
     args.start_epoch = 0
 
-    if args.finetune and (args.ckpt is None):
-        print ('to finetune the model, please specify --ckpt.')
-        import sys
-        sys.exit()
-
-    # define models
     generator = GeneratorCustom(512, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier).to(device)
     discriminator = Discriminator(512, channel_multiplier=args.channel_multiplier).to(device)
-
     g_ema = GeneratorCustom(512, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier).to(device)
     g_ema.eval()
     accumulate(g_ema, generator, 0)
 
     sphereface_net = getattr(sphereface, 'sphere20a')()
-    sphereface_net.load_state_dict(torch.load(os.path.join(args.path, 'resources', 'sphere20a_20171020.pth')))
+    sphereface_net.load_state_dict(torch.load('pretrained/sphere20a_20171020.pth'))
     sphereface_net.to(device)
     sphereface_net.eval()
     sphereface_net.feature = True
@@ -399,17 +357,7 @@ if __name__ == "__main__":
         lr=args.lr,
         betas=(0.9, 0.999),
     )
-
-    #if args.ckpt is not None:
-        #print("load model:", args.ckpt)
     ckpt = torch.load(args.ckpt, map_location=lambda storage, loc: storage)
-
-    try:
-        ckpt_name = os.path.basename(args.ckpt)
-        #args.start_epoch = int(os.path.splitext(ckpt_name)[0].split('_')[1])+1 # asuming saving as epoch_1_iter_1000.pt  or epoch_1.pt
-        #args.start_epoch = 50
-    except ValueError:
-        pass
 
     generator.load_state_dict(ckpt["g"])
     discriminator.load_state_dict(ckpt["d"])
@@ -418,7 +366,6 @@ if __name__ == "__main__":
     g_optim.load_state_dict(ckpt["g_optim"])
     d_optim.load_state_dict(ckpt["d_optim"])
 
-    #if args.distributed:
     generator = nn.parallel.DistributedDataParallel(
         generator,
         device_ids=[args.local_rank],
@@ -431,12 +378,7 @@ if __name__ == "__main__":
                                                         output_device=args.local_rank,
                                                         broadcast_buffers=False)
     dataset = CustomDeepFashionDatasetHD()
-    class Args:
-        pairLst = 'custom_DeepFashionV2/face-only-pairs.csv'
-        dataroot = 'custom_DeepFashionV2'
-        phase = 'train'
-    opt = Args
-    dataset.initialize(opt, 512)
+    dataset.initialize(args, 512)
     sampler = data_sampler(dataset, shuffle=True, distributed=True)
     loader = data.DataLoader(
         dataset,

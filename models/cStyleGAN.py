@@ -36,7 +36,6 @@ class Upsample(nn.Module):
         out = upfirdn2d(input, self.kernel, up=self.factor, down=1, pad=self.pad)
         return out
 
-
 class Downsample(nn.Module):
     def __init__(self, kernel, factor=2):
         super().__init__()
@@ -52,7 +51,6 @@ class Downsample(nn.Module):
         out = upfirdn2d(input, self.kernel, up=1, down=self.factor, pad=self.pad)
 
         return out
-
 
 class Blur(nn.Module):
     def __init__(self, kernel, pad, upsample_factor=1):
@@ -71,7 +69,6 @@ class Blur(nn.Module):
         out = upfirdn2d(input, self.kernel, pad=self.pad)
 
         return out
-
 
 class EqualConv2d(nn.Module):
     def __init__(
@@ -110,7 +107,6 @@ class EqualConv2d(nn.Module):
             f" {self.weight.shape[2]}, stride={self.stride}, padding={self.padding})"
         )
 
-
 class EqualLinear(nn.Module):
     def __init__(
             self, in_dim, out_dim, bias=True, bias_init=0, lr_mul=1, activation=None
@@ -146,7 +142,6 @@ class EqualLinear(nn.Module):
         return (
             f"{self.__class__.__name__}({self.weight.shape[1]}, {self.weight.shape[0]})"
         )
-
 
 class ModulatedConv2d(nn.Module):
     def __init__(
@@ -283,7 +278,6 @@ class ModulatedConv2d(nn.Module):
 
         return out
 
-
 class SpatiallyModulatedConv2d(nn.Module):
     def __init__(
             self,
@@ -375,7 +369,6 @@ class SpatiallyModulatedConv2d(nn.Module):
         out = self.normalize(out)
 
         return out
-
 
 class NoiseInjection(nn.Module):
     def __init__(self):
@@ -623,7 +616,6 @@ class SpatialAppearanceEncoder(nn.Module):
         f1 = self.up(f2) + self.conv11(torch.cat([x1, p1], 1))
         F1 = self.conv13(f1)
         return [F6, F5, F4, F3, F2, F1]
-
 
 class GeneratorCustom(nn.Module):
     def __init__(
@@ -946,6 +938,7 @@ class VGGLoss(nn.Module):
         return loss
 
 from torchvision import models
+
 class Vgg19(torch.nn.Module):
     def __init__(self, requires_grad=False):
         super(Vgg19, self).__init__()

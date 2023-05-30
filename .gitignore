@@ -5,6 +5,13 @@
 .ipynb_checkpoints/
 __pycache__/
 checkpoint/
-data/
+fashiontryon_dataset/
+fashiontryon_result
 fashion_data/
 result_eval/
+standard.py
+VITONHD/
+viton_hd_dataset/
+runs/
+ablation/
+account.txt

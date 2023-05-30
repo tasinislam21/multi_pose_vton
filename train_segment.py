@@ -5,34 +5,28 @@ import torch.utils.data as data
 import torchvision
 from tensorboardX import SummaryWriter
 import torch.nn.functional as F
-from models import networks, xing
+from models import networks
+import numpy as np
 import os.path as osp
 from PIL import Image
 import os
 import torchvision.transforms as transforms
-import numpy as np
-
-#os.environ["CUDA_VISIBLE_DEVICES"]="0,1,2,3,5,6,7"
 
 device = "cuda"
 from distributed import (
     get_rank,
-    synchronize
+    synchronize,
 )
 
-class Args:
-    batchSize = 2
-    dataroot = 'data'
-    datapairs = 'train_pairs.txt'
-    phase = 'train'
-    beta1 = 0.5
-    no_lsgan = True
-    pool_size = 50
+parser = argparse.ArgumentParser(description="Training the segment module")
+parser.add_argument("--local_rank", type=int, default=0)
+parser.add_argument("--batchSize", type=int, default=8)
+parser.add_argument("--dataroot", type=str, default='viton_hd_dataset')
+parser.add_argument("--datapairs", type=str, default='train_pairs.txt')
+parser.add_argument("--phase", type=str, default='train')
+parser.add_argument("--beta1", type=int, default=0.5)
+parser.add_argument("--no_lsgan", type=bool, default=True)
 
-opt = Args
-
-parser = argparse.ArgumentParser(description="Pose with Style trainer")
-parser.add_argument("--local_rank", type=int, default=0, help="local rank for distributed training")
 args = parser.parse_args()
 
 print ('Distributed Training Mode.')
@@ -40,24 +34,22 @@ torch.distributed.init_process_group(backend="nccl", init_method="env://")
 torch.cuda.set_device(args.local_rank)
 synchronize()
 
-#G1 = networks.GMM(input_nc=7).to(device)
-G1 = xing.XingNetwork(input_nc=[3,3], output_nc=3).to(device)
+G1 = networks.PHPM(input_nc=6, output_nc=4).to(device)
 D1 = networks.Discriminator(7).to(device)
+optimizerG = torch.optim.Adam(G1.parameters(), lr=0.0002, betas=(args.beta1, 0.999))
+optimizerD = torch.optim.Adam(D1.parameters(), lr=0.0002, betas=(args.beta1, 0.999))
 
-optimizerG = torch.optim.Adam(G1.parameters(), lr=0.0002, betas=(opt.beta1, 0.999))
-optimizerD = torch.optim.Adam(D1.parameters(), lr=0.0002, betas=(opt.beta1, 0.999))
-
+checkpoint_loc = "checkpoint_segment/"
 if get_rank() == 0:
-    if not os.path.exists('gmm'):
-        os.makedirs('gmm')
-    writer = SummaryWriter('runs/xing')
+    if not os.path.exists(checkpoint_loc):
+        os.makedirs(checkpoint_loc)
+    writer = SummaryWriter('runs/segment')
 
 G1 = nn.parallel.DistributedDataParallel(
         G1,
-        #find_unused_parameters=True,
         device_ids=[args.local_rank],
         output_device=args.local_rank,
-        broadcast_buffers=False
+        broadcast_buffers=False,
     )
 
 D1 = nn.parallel.DistributedDataParallel(
@@ -97,14 +89,8 @@ class BaseDataset(data.Dataset):
         c_name = self.cloth_names[index]
         h_name = self.human_names[index]
 
-        candidate_path = osp.join(self.opt.dataroot, self.opt.phase, 'candidate', h_name)
-        candidate = Image.open(candidate_path).convert('RGB')
-
         label_path = osp.join(self.opt.dataroot, self.opt.phase, 'candidate_label', h_name+".png")
         label = Image.open(label_path).convert('L')
-
-        skeleton_path = osp.join(self.opt.dataroot, self.opt.phase, 'candidate_skeleton', h_name.replace(".jpg", "_rendered.png"))
-        skeleton = Image.open(skeleton_path).convert('RGB')
 
         dense_path = osp.join(self.opt.dataroot, self.opt.phase, 'candidate_dense', h_name.replace(".jpg", "_iuv.png"))
         dense = np.array(Image.open(dense_path))
@@ -118,23 +104,17 @@ class BaseDataset(data.Dataset):
         transform_A = get_transform(normalize=False)
         transform_B = get_transform()
 
-        candidate_tensor = transform_B(candidate)
-        candidate_tensor = torch.nn.functional.pad(input=candidate_tensor, pad=(82, 82, 0, 0), mode='constant', value=0)
         label_tensor = transform_A(label) * 255
         label_tensor = torch.nn.functional.pad(input=label_tensor, pad=(82, 82, 0, 0), mode='constant', value=0)
         clothes_tensor = transform_B(clothes)
         clothes_tensor = torch.nn.functional.pad(input=clothes_tensor, pad=(82, 82, 0, 0), mode='constant', value=0)
         clothes_mask_tensor = transform_A(clothes_mask)
-
         clothes_mask_tensor = torch.nn.functional.pad(input=clothes_mask_tensor, pad=(82, 82, 0, 0), mode='constant', value=0)
-        skeleton_tensor = transform_B(skeleton)
-        skeleton_tensor = torch.nn.functional.pad(input=skeleton_tensor, pad=(82, 82, 0, 0), mode='constant', value=0)
-
         dense_tensor = torch.from_numpy(dense).permute(2, 0, 1)
         dense_tensor = torch.nn.functional.pad(input=dense_tensor, pad=(82, 82, 0, 0), mode='constant', value=0)
 
-        return {'label': label_tensor,'clothes': clothes_tensor, 'candidate': candidate_tensor,
-                'skeleton': skeleton_tensor, 'clothes_mask': clothes_mask_tensor, 'dense': dense_tensor}
+        return {'label': label_tensor,'clothes': clothes_tensor,
+                'dense': dense_tensor, 'clothes_mask': clothes_mask_tensor}
 
     def __len__(self):
         return len(self.human_names)
@@ -147,86 +127,105 @@ def data_sampler(dataset, shuffle, distributed):
     else:
         return data.SequentialSampler(dataset)
 
-train_dataset = BaseDataset(opt)
+train_dataset = BaseDataset(args)
 sampler = data_sampler(train_dataset, shuffle=True, distributed=True)
 
 train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
-            batch_size=opt.batchSize,
+            batch_size=args.batchSize,
             sampler=sampler,
             drop_last=True,
             pin_memory=True,
             num_workers=2)
 
+def cross_entropy2d(input, target):
+    n, c, h, w = input.size()
+    nt, _, ht, wt = target.size()
+    # Handle inconsistent size between input and target
+    if h != ht or w != wt:
+        input = F.interpolate(input, size=(ht, wt), mode="bilinear", align_corners=True)
+    input = input.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+    target = target.view(-1)
+    target = target.type(torch.int64)
+    loss = F.cross_entropy(input, target)
+    return loss
+
+def generate_discrete_label(inputs, label_nc, onehot=True):
+    pred_batch = []
+    size = inputs.size()
+    for input in inputs:
+        input = input.view(1, label_nc, size[2], size[3])
+        pred = np.squeeze(input.data.max(1)[1].cpu().numpy(), axis=0)
+        pred_batch.append(pred)
+    pred_batch = np.array(pred_batch)
+    pred_batch = torch.from_numpy(pred_batch)
+    label_map = []
+    for p in pred_batch:
+        p = p.view(1, 512, 512)
+        label_map.append(p)
+    label_map = torch.stack(label_map, 0)
+    if not onehot:
+        return label_map.float().cuda()
+    size = label_map.size()
+    oneHot_size = (size[0], label_nc, size[2], size[3])
+    input_label = torch.cuda.FloatTensor(torch.Size(oneHot_size)).zero_()
+    input_label = input_label.scatter_(1, label_map.data.long().cuda(), 1.0)
+    return input_label
+
 def discriminate(netD ,input_label, real_or_fake):
     input = torch.cat([input_label, real_or_fake], dim=1)
     return netD.forward(input)
 
-
-criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=torch.cuda.FloatTensor)
-criterionVGG = networks.VGGLoss()
-criterionFeat = nn.L1Loss()
-
-tanh = nn.Tanh()
-checkpoint_loc = "gmm/"
+criterionGAN = networks.GANLoss(use_lsgan=not args.no_lsgan, tensor=torch.cuda.FloatTensor)
 
 step = 0
-
-g_module = G1.module
-
+sigmoid = nn.Sigmoid()
 for epoch in range(50):
     for data in train_dataloader: #training
-        candidate = data['candidate'].to(device)
         clothes = data['clothes'].to(device)
         clothes_mask = data['clothes_mask'].to(device)
         clothes = clothes * clothes_mask
-        skeleton = data['skeleton'].to(device)
+        dense = data['dense'].to(device)
         label = data['label'].float().to(device)
+
+        background_label = (label == 0).float()
         cloth_label = (label == 5).float() + (label == 6).float() + (label == 7).float()
+        arm1_label = (label == 14).float()
+        arm2_label = (label == 15).float()
 
-        requires_grad(D1, True)
+        ground_truth_4 = torch.cat([background_label, cloth_label, arm1_label, arm2_label], 1)
+        G1_in = torch.cat([clothes, dense], dim=1)
+        ground_truth_1 = generate_discrete_label(ground_truth_4.detach(), 4, False)
         requires_grad(G1, False)
+        requires_grad(D1, True)
 
-        #fake_c, affine = G1.forward(clothes, cloth_label, skeleton)
-        fake_c = G1(input=[clothes, skeleton])
-        fake_c *= cloth_label
-        fake_c = tanh(fake_c)
+        arm_label = G1(G1_in)
+        arm_label = sigmoid(arm_label)
+        armlabel_map = generate_discrete_label(arm_label.detach(), 4, False)
+        ground_truth_1 = generate_discrete_label(ground_truth_4.detach(), 4, False)
 
-        real_pool = (candidate * cloth_label)
-        fake_pool = fake_c
-        input_pool = torch.cat([cloth_label, clothes], 1)
-        D_pool = D1
-
-        pred_fake = discriminate(D_pool, input_pool.detach(), fake_pool.detach())
+        pred_fake = discriminate(D1, G1_in.detach(), armlabel_map.detach())
         loss_D_fake = criterionGAN(pred_fake, False)
-        pred_real = discriminate(D_pool, input_pool.detach(), real_pool.detach())
+        pred_real = discriminate(D1, G1_in.detach(), ground_truth_1.detach())
         loss_D_real = criterionGAN(pred_real, True)
-        loss_D = (loss_D_fake + loss_D_real)
-
+        loss_D = loss_D_fake + loss_D_real
 
         optimizerD.zero_grad()
         loss_D.backward()
         optimizerD.step()
 
-        requires_grad(D1, False)
         requires_grad(G1, True)
+        requires_grad(D1, False)
 
-        #fake_c, affine = G1.forward(clothes, cloth_label, skeleton)
-        fake_c = G1(input=[clothes, skeleton])
-        fake_c *= cloth_label
-        fake_c = tanh(fake_c)
-
-        real_pool = (candidate * cloth_label)
-        fake_pool = fake_c
-        input_pool = torch.cat([cloth_label, clothes], 1)
-        D_pool = D1
-
-        pred_fake = D_pool.forward(torch.cat((input_pool.detach(), fake_pool.detach()), dim=1))
+        arm_label = G1(G1_in)
+        arm_label = sigmoid(arm_label)
+        armlabel_map = generate_discrete_label(arm_label.detach(), 4, False)
+        pred_fake = D1.forward(torch.cat((G1_in.detach(), armlabel_map.detach()), dim=1))
         loss_G_GAN = criterionGAN(pred_fake, True)
-        loss_G_VGG = criterionVGG(fake_pool, real_pool)
-        #L1_loss = criterionFeat(affine, real_pool)
-        L1_loss = criterionFeat(fake_pool, real_pool)
-        loss_G = loss_G_GAN + L1_loss + loss_G_VGG
+        pair_GANloss = loss_G_GAN * 5
+        pair_GANloss = pair_GANloss / 2
+        CE_loss = cross_entropy2d(arm_label, ground_truth_1)
+        loss_G = CE_loss + pair_GANloss
 
         optimizerG.zero_grad()
         loss_G.backward()
@@ -239,15 +238,14 @@ for epoch in range(50):
                 writer.add_scalar('loss_G', loss_G, step)
                 writer.add_scalar('loss_D', loss_D, step)
 
-            if step % 200 == 0:
+            if step % 1000 == 0:
+                writer.add_image('generated', torchvision.utils.make_grid(armlabel_map), step)
+                writer.add_image('gt', torchvision.utils.make_grid(ground_truth_1), step)
                 writer.add_image('clothes', torchvision.utils.make_grid(clothes), step)
-                writer.add_image('gt', torchvision.utils.make_grid(candidate*cloth_label), step)
-                #writer.add_image('affine_garment', torchvision.utils.make_grid(affine), step)
-                writer.add_image('generated', torchvision.utils.make_grid(fake_c), step)
+                writer.add_image('dense', torchvision.utils.make_grid(dense), step)
 
-    for param_group in optimizerD.param_groups:
-        param_group['lr'] *= 0.65
+
     if get_rank() == 0:
-        torch.save(g_module.state_dict(), checkpoint_loc + '/gmm_xing_' + str(epoch) + '.pth')
+        torch.save(G1.module.state_dict(), checkpoint_loc + '/segment_' + str(epoch) + '.pth')
 if get_rank() == 0:
-    torch.save(g_module.state_dict(), checkpoint_loc + '/gmm_xing_final.pth')
+    torch.save(G1.module.state_dict(), checkpoint_loc + '/segment_final.pth')
