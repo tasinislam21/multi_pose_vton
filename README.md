@@ -7,7 +7,7 @@ This repository has the official code for 'StyleVTON: A Multi-Pose Virtual Try-O
 We have included the pre-trained checkpoint, dataset and results.   
 </p>
 
-> **Abstract:** *Virtual try-on models have been developed using deep learning techniques to transfer clothing product images onto a candidate. While previous research has primarily focused on enhancing the realism of the garment transfer, such as improving texture quality and preserving details, there is untapped potential to further improve the shopping experience for consumers. The present study outlines the development of an innovative virtual try-on model, namely StyleVTON, to enhance consumers' shopping experiences. Our method synthesises a try-on image while also allowing for changes in pose. To achieve this, StyleVTON first predicts the segmentation of the target pose based on the target garment. Next, the segmentation layout guides the warping process of the target garment. And finally, the pose of the candidate is transferred to the desired posture. Our experiments demonstrate that StyleVTON can generate high-quality images of candidates wearing the desired clothes in a desired pose, offering a promising solution for enhancing the virtual try-on experience. Our findings reveal that StyleVTON outperforms other comparable methods, particularly in preserving the facial identity of the candidate and synthesising high-quality garments.*
+> **Abstract:** *Virtual try-on models have been developed using deep learning techniques to transfer clothing product images onto a candidate. While previous research has primarily focused on enhancing the realism of the garment transfer, such as improving texture quality and preserving details, there is untapped potential to further improve the shopping experience for consumers. The present study outlines the development of an innovative multi-pose virtual try-on model, namely StyleVTON, to potentially enhance consumers' shopping experiences. Our method synthesises a try-on image while also allowing for changes in pose. To achieve this, StyleVTON first predicts the segmentation of the target pose based on the target garment. Next, the segmentation layout guides the warping process of the target garment. Finally, the pose of the candidate is transferred to the desired posture. Our experiments demonstrate that StyleVTON can generate satisfactory images of candidates wearing the desired clothes in a desired pose, potentially offering a promising solution for enhancing the virtual try-on experience. Our findings reveal that StyleVTON outperforms other comparable methods, particularly in preserving the facial identity of the candidate and geometrically transforming the garments.*
 
 ## Installation
 
@@ -55,4 +55,6 @@ To train, run ```python -m torch.distributed.launch --nproc_per_node=<number_of_
 
 <!-- Results -->
 ## Results
+More results can be downloaded here: [[Results]](https://www.dropbox.com/scl/fi/tc5vlwkjdsc9miwtg21w1/more_result.zip?rlkey=hw19ze3uj7szco2giid4ozkof&dl=0)
+
 ![image](image/qualitative.jpg)
